@@ -21,11 +21,13 @@ Protected Class Log4Xojo
 		  // Initialize the Mutex with the log name to ensure uniqueness
 		  mLogQueueMutex = New Mutex("Log4Xojo_" + Name)
 		  
-		  // Set up a background thread for logging
-		  mLogThread = New Thread
-		  AddHandler mLogThread.Run, AddressOf LogThreadHandler
-		  mRunning = True
-		  mLogThread.Start
+		  // Set up a background thread for logging only if not in DebugBuild
+		  #If Not DebugBuild Then
+		    mLogThread = New Thread
+		    AddHandler mLogThread.Run, AddressOf LogThreadHandler
+		    mRunning = True
+		    mLogThread.Start
+		  #EndIf
 		End Sub
 	#tag EndMethod
 
@@ -63,63 +65,95 @@ Protected Class Log4Xojo
 
 	#tag Method, Flags = &h0
 		Sub Log(message As String, level As LogLevel, Optional location As String = "")
-		  // Check if the current message level is high enough to be logged
-		  If Integer(level) < Integer(mCurrentLogLevel) Then
-		    Return // Don't log messages below the current log level
-		  End If
-		  
-		  // Prepare the log message with timestamp and log level
-		  Var formattedMessage As String
-		  Var timestamp As String
-		  timestamp = DateTime.Now.SQLDateTime
-		  
-		  Var l As String = StringValue(level)
-		  
-		  // Construct the message with optional location
-		  If location = "" Then
-		    formattedMessage = "[" + timestamp + "] [" + l + "] " + message
-		  Else
-		    formattedMessage = "[" + timestamp + "] [" + location + "] [" + l + "] " + message
-		  End If
-		  
-		  // Existing logging logic remains the same
-		  For Each destination As LogDestination In mLogDestinations
-		    Select Case destination
-		    Case LogDestination.DebugLog
-		      System.DebugLog(formattedMessage)
-		      
-		    Case LogDestination.SystemLog
-		      System.Log(SystemLogLevelFromLogLevel(level), formattedMessage)
-		      
-		    Case LogDestination.FileLog
-		      // Use mutex when adding to queue
-		      mLogQueueMutex.Enter
-		      Try
-		        mLogQueue.Add(formattedMessage)
-		      Finally
-		        mLogQueueMutex.Leave
-		      End Try
-		      
-		    Case LogDestination.All
-		      System.DebugLog(formattedMessage)
-		      System.Log(SystemLogLevelFromLogLevel(level), formattedMessage)
-		      
-		      // Use mutex when adding to queue
-		      // Optional: Prevent queue from growing too large
-		      mLogQueueMutex.Enter
-		      Try
-		        If mLogQueue.Count >= MaxQueueSize Then
-		          // Optionally: Remove oldest message to make room
-		          mLogQueue.RemoveAt(0)
-		        End If
+		  #If Not DebugBuild Then
+		    // Check if the current message level is high enough to be logged
+		    If Integer(level) < Integer(mCurrentLogLevel) Then
+		      Return // Don't log messages below the current log level
+		    End If
+		    
+		    // Prepare the log message with timestamp and log level
+		    Var formattedMessage As String
+		    Var timestamp As String
+		    timestamp = DateTime.Now.SQLDateTime
+		    
+		    Var l As String = StringValue(level)
+		    
+		    // Construct the message with optional location
+		    If location = "" Then
+		      formattedMessage = "[" + timestamp + "] [" + l + "] " + message
+		    Else
+		      formattedMessage = "[" + timestamp + "] [" + location + "] [" + l + "] " + message
+		    End If
+		    
+		    // Existing logging logic remains the same
+		    For Each destination As LogDestination In mLogDestinations
+		      Select Case destination
+		      Case LogDestination.DebugLog
+		        System.DebugLog(formattedMessage)
 		        
-		        // Add new message
-		        mLogQueue.Add(formattedMessage)
-		      Finally
-		        mLogQueueMutex.Leave
-		      End Try
-		    End Select
-		  Next
+		      Case LogDestination.SystemLog
+		        System.Log(SystemLogLevelFromLogLevel(level), formattedMessage)
+		        
+		      Case LogDestination.FileLog
+		        // Use mutex when adding to queue
+		        mLogQueueMutex.Enter
+		        Try
+		          mLogQueue.Add(formattedMessage)
+		        Finally
+		          mLogQueueMutex.Leave
+		        End Try
+		        
+		      Case LogDestination.All
+		        System.DebugLog(formattedMessage)
+		        System.Log(SystemLogLevelFromLogLevel(level), formattedMessage)
+		        
+		        // Use mutex when adding to queue
+		        // Optional: Prevent queue from growing too large
+		        mLogQueueMutex.Enter
+		        Try
+		          If mLogQueue.Count >= MaxQueueSize Then
+		            // Optionally: Remove oldest message to make room
+		            mLogQueue.RemoveAt(0)
+		          End If
+		          
+		          // Add new message
+		          mLogQueue.Add(formattedMessage)
+		        Finally
+		          mLogQueueMutex.Leave
+		        End Try
+		      End Select
+		    Next
+		  #Else
+		    // In DebugBuild, handle logging synchronously to avoid async issues
+		    If Integer(level) < Integer(mCurrentLogLevel) Then
+		      Return // Don't log messages below the current log level
+		    End If
+		    
+		    Var formattedMessage As String
+		    Var timestamp As String = DateTime.Now.SQLDateTime
+		    Var l As String = StringValue(level)
+		    
+		    If location = "" Then
+		      formattedMessage = "[" + timestamp + "] [" + l + "] " + message
+		    Else
+		      formattedMessage = "[" + timestamp + "] [" + location + "] [" + l + "] " + message
+		    End If
+		    
+		    For Each destination As LogDestination In mLogDestinations
+		      Select Case destination
+		      Case LogDestination.DebugLog
+		        System.DebugLog(formattedMessage)
+		      Case LogDestination.SystemLog
+		        System.Log(SystemLogLevelFromLogLevel(level), formattedMessage)
+		      Case LogDestination.FileLog
+		        // Synchronously log to DebugLog in DebugBuild to avoid async file logging
+		        System.DebugLog(formattedMessage)
+		      Case LogDestination.All
+		        System.DebugLog(formattedMessage)
+		        System.Log(SystemLogLevelFromLogLevel(level), formattedMessage)
+		      End Select
+		    Next
+		  #EndIf
 		End Sub
 	#tag EndMethod
 
@@ -377,7 +411,7 @@ Protected Class Log4Xojo
 		Official GitHub repo: https://github.com/xojo/log4xojo
 		Blog: https://blog.xojo.com/2024/11/26/log4xojo-a-more-powerful-way-to-manage-your-app-logging/
 		
-
+		
 		# 1. Monitoring Application Performance in Production
 		In a production environment, it’s essential to keep track of your application’s behavior without impacting performance. With Log4Xojo, you can:
 		
